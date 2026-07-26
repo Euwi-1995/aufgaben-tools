@@ -58,6 +58,56 @@
   }
   .rang-top{ background:#2f5fdd; color:#fff; }
   .rang-none{ background:transparent; color:var(--hint); font-weight:400; }
+
+  /* ---------- Handy-Ansicht ----------
+     Auf schmalen Bildschirmen laesst sich eine 6-spaltige Tabelle nicht sinnvoll darstellen -
+     sie wird horizontal gequetscht und unlesbar. Deshalb wird ab hier jede Tabellenzeile zu
+     einer eigenen Karte umgebaut (Tabellenkopf ausgeblendet, Zellen untereinander, Beschriftung
+     kommt per data-label aus dem HTML). Die Status-Symbole bekommen groessere Tippflaechen. */
+  @media (max-width: 760px){
+    .wrap{ padding:14px 10px 50px; }
+    h1{ font-size:17px; }
+    .hint{ font-size:12px; }
+    .card{ padding:12px; border-radius:8px; }
+
+    /* Filterleiste untereinander statt nebeneinander */
+    .card > .row{ flex-direction:column; align-items:stretch; gap:8px; }
+    .card > .row > label{ display:flex; align-items:center; gap:8px; }
+    #whoAmI, #search{ width:100%; font-size:16px; }   /* 16px verhindert Auto-Zoom auf iOS */
+    #doneRangeRow{ flex-direction:row; gap:8px; }
+    #doneRangeRow label{ flex:1; display:flex; align-items:center; gap:6px; }
+    #doneFrom, #doneTo{ flex:1; min-width:0; font-size:16px; }
+    .card > .row > span[style]{ display:none; }        /* der Abstandshalter */
+    #refreshBtn{ flex:1; padding:11px 12px; font-size:15px; }
+    #settingsBtn{ padding:11px 14px; font-size:15px; }
+
+    /* Tabelle -> Karten */
+    thead{ display:none; }
+    table, tbody, tr, td{ display:block; width:100%; }
+    .card--table{ padding:0; background:transparent; border:none; }
+    tr{
+      background:var(--panel); border:1px solid var(--border); border-radius:10px;
+      padding:12px; margin-bottom:10px;
+    }
+    tr.mine{ background:var(--accent-bg); border-color:#c9d8fb; }
+    td{ border:none; padding:2px 0; }
+
+    /* Kopfzeile der Karte: Rang + Ticketnummer nebeneinander */
+    td[data-label="Rang"]{ display:inline-block; width:auto; vertical-align:middle; }
+    td[data-label="Ticket"]{ display:inline-block; width:auto; vertical-align:middle; margin-left:8px; }
+
+    td[data-label="Titel"]{ font-weight:600; font-size:14.5px; margin:6px 0 4px; line-height:1.35; }
+
+    td[data-label="Kunde / Projekt"]:not(:empty)::before{ content:"Kunde: "; color:var(--muted); }
+    td[data-label="Zuständig"]:not(:empty)::before{ content:"Zuständig: "; color:var(--muted); }
+    td[data-label="Kunde / Projekt"], td[data-label="Zuständig"]{ font-size:12.5px; color:var(--text); }
+
+    td[data-label="Status"]{ margin-top:10px; }
+    .flag-row{ gap:6px; }
+    .flag-toggle-sm{ padding:9px 13px; font-size:17px; }   /* groessere Tippflaeche */
+    .rang{ font-size:13px; padding:4px 8px; }
+    .empty{ background:var(--panel); border:1px solid var(--border); border-radius:10px; }
+  }
 </style>
 </head>
 <body>
@@ -92,7 +142,7 @@
 
   <div class="card" id="statusMsg" style="display:none;"></div>
 
-  <div class="card" style="padding:0;">
+  <div class="card card--table" style="padding:0;">
     <div style="overflow:auto;">
       <table>
         <thead>
@@ -277,13 +327,15 @@
       const rangCell = (r != null)
         ? `<span class="rang rang-top">${r}</span>`
         : `<span class="rang rang-none" title="keine Reihenfolge vergeben">–</span>`;
+      // data-label steuert die Handy-Ansicht (siehe @media-Block im CSS): dort wird aus jeder
+      // Zeile eine Karte, und die Beschriftungen kommen aus diesen Attributen.
       return `<tr class="${mine ? 'mine' : ''}">
-        <td>${rangCell}</td>
-        <td class="ticket">#${escapeHtml(t.nr)}</td>
-        <td>${escapeHtml(t.text)}</td>
-        <td>${escapeHtml(kp)}</td>
-        <td>${escapeHtml(t.assignees || '')}</td>
-        <td><div class="flag-row">${flagCells}</div></td>
+        <td data-label="Rang">${rangCell}</td>
+        <td data-label="Ticket" class="ticket">#${escapeHtml(t.nr)}</td>
+        <td data-label="Titel">${escapeHtml(t.text)}</td>
+        <td data-label="Kunde / Projekt">${escapeHtml(kp)}</td>
+        <td data-label="Zuständig">${escapeHtml(t.assignees || '')}</td>
+        <td data-label="Status"><div class="flag-row">${flagCells}</div></td>
       </tr>`;
     }).join('');
 
