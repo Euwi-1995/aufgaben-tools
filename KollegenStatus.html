@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aufgaben-Status</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --border:#e3e4e8; --border-strong:#cfd1d8;
+    --text:#1a1b1e; --muted:#71737c; --hint:#9a9ca4;
+    --accent:#2f5fdd; --accent-bg:#eaf0ff;
+    --ok:#1e8e5a; --warn:#b9770e; --danger:#c0392b;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    background:var(--bg); color:var(--text); font-size:14px;
+  }
+  .wrap{ max-width:920px; margin:0 auto; padding:20px 16px 60px; }
+  h1{ font-size:18px; margin:0 0 4px; }
+  .hint{ color:var(--muted); font-size:12.5px; margin:0 0 18px; }
+  .card{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  label{ font-size:12.5px; color:var(--muted); }
+  select, input[type=text]{
+    padding:7px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:13.5px; font-family:inherit;
+  }
+  button{
+    padding:7px 12px; border-radius:6px; border:1px solid var(--border-strong); background:#fff; cursor:pointer; font-size:13px;
+  }
+  button.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th, td{ padding:8px 8px; border-bottom:1px solid var(--border); text-align:left; vertical-align:middle; }
+  th{ font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.02em; font-weight:600; }
+  tr.mine{ background:var(--accent-bg); }
+  .ticket{ color:var(--accent); font-weight:700; font-size:12.5px; }
+  .status-text{ color:var(--muted); font-size:12.5px; }
+  .empty{ padding:20px; text-align:center; color:var(--hint); }
+  .error{ color:var(--danger); font-size:13px; }
+  #setupBox{ display:none; }
+  #setupBox textarea{ width:100%; min-height:70px; font-family:monospace; font-size:12.5px; padding:8px; border:1px solid var(--border-strong); border-radius:6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📋 Aufgaben-Status</h1>
+  <p class="hint">Status deiner Aufgaben eintragen. Du siehst alle Aufgaben, ändern kannst du nur deine eigenen (blau hinterlegt).</p>
+
+  <div class="card">
+    <div class="row">
+      <label>Wer bist du?
+        <select id="whoAmI"></select>
+      </label>
+      <label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="showDone"> auch erledigte anzeigen</label>
+      <input type="text" id="search" placeholder="Suche...">
+      <span style="flex:1;"></span>
+      <button type="button" id="refreshBtn">🔄 Aktualisieren</button>
+      <button type="button" id="settingsBtn" title="Backend-Adresse ändern">⚙</button>
+    </div>
+  </div>
+
+  <div class="card" id="setupBox">
+    <label>Backend-Adresse (Web-App-URL aus Google Apps Script)</label>
+    <textarea id="backendUrlInput" placeholder="https://script.google.com/macros/s/.../exec"></textarea>
+    <div style="margin-top:8px;">
+      <button type="button" class="primary" id="saveBackendBtn">Speichern</button>
+    </div>
+  </div>
+
+  <div class="card" id="statusMsg" style="display:none;"></div>
+
+  <div class="card" style="padding:0;">
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr><th>Ticket</th><th>Titel</th><th>Kunde / Projekt</th><th>Zuständig</th><th>Status</th></tr>
+        </thead>
+        <tbody id="ticketBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+
+  // Wird von Eugenia einmalig auf die echte Apps-Script-URL gesetzt, sobald das Backend
+  // eingerichtet ist. Kann zusaetzlich pro Geraet ueber das Zahnrad-Icon ueberschrieben werden
+  // (localStorage) - falls sich die Backend-Adresse einmal aendert.
+  const DEFAULT_BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwWnSxuSCz7Jf6JElIbexA9UccD0z_5WAJcyP51qIsrX8xHGQaoqwBRm-3-P0LCFghA/exec';
+  const STORAGE_KEY_URL = 'kollegenStatusBackendUrl';
+  const STORAGE_KEY_WHO = 'kollegenStatusWhoAmI';
+
+  const KNOWN_PERSONS = ['Eugenia','Frank','Matthias','Thorsten','Bertram','Kevin','Daniel','Ali','Philip','Alex','Benedikt'];
+  const STATUS_LABELS = {
+    in_bearbeitung: 'in Bearbeitung',
+    an_kunde_gemeldet: 'an Kunde gemeldet',
+    wartestellung: 'Wartestellung',
+    erledigt: 'erledigt'
+  };
+
+  let tickets = [];
+  let whoAmI = localStorage.getItem(STORAGE_KEY_WHO) || '';
+
+  function getBackendUrl(){
+    return localStorage.getItem(STORAGE_KEY_URL) || DEFAULT_BACKEND_URL;
+  }
+
+  function escapeHtml(s){
+    return (s || '').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function showMsg(text, isError){
+    const el = $('statusMsg');
+    el.style.display = text ? '' : 'none';
+    el.innerHTML = isError ? `<span class="error">${escapeHtml(text)}</span>` : escapeHtml(text);
+  }
+
+  function populateWhoAmI(){
+    const present = new Set(KNOWN_PERSONS);
+    tickets.forEach(t => (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean).forEach(p => present.add(p)));
+    const list = [...present];
+    $('whoAmI').innerHTML = '<option value="">– auswählen –</option>' + list.map(p => `<option value="${escapeHtml(p)}" ${p === whoAmI ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
+  }
+
+  function renderTable(){
+    const showDone = $('showDone').checked;
+    const q = $('search').value.trim().toLowerCase();
+    const rows = tickets.filter(t => {
+      if (!showDone && t.status === 'erledigt') return false;
+      if (q){
+        const hay = [t.text, t.kunde, t.projekt, t.assignees, 'ticket ' + t.nr].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    }).sort((a,b) => (a.status === 'erledigt') - (b.status === 'erledigt') || String(a.nr).localeCompare(String(b.nr), 'de', { numeric:true }));
+
+    if (!rows.length){
+      $('ticketBody').innerHTML = '<tr><td colspan="5" class="empty">Keine Aufgaben in dieser Ansicht.</td></tr>';
+      return;
+    }
+
+    $('ticketBody').innerHTML = rows.map(t => {
+      const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
+      const mine = whoAmI && assigneeList.includes(whoAmI);
+      const kp = [t.kunde, t.projekt].filter(Boolean).join(' / ');
+      const statusCell = mine
+        ? `<select data-nr="${escapeHtml(t.nr)}">${Object.keys(STATUS_LABELS).map(v => `<option value="${v}" ${t.status === v ? 'selected' : ''}>${STATUS_LABELS[v]}</option>`).join('')}</select>`
+        : `<span class="status-text">${escapeHtml(STATUS_LABELS[t.status] || t.status || '–')}</span>`;
+      return `<tr class="${mine ? 'mine' : ''}">
+        <td class="ticket">#${escapeHtml(t.nr)}</td>
+        <td>${escapeHtml(t.text)}</td>
+        <td>${escapeHtml(kp)}</td>
+        <td>${escapeHtml(t.assignees || '')}</td>
+        <td>${statusCell}</td>
+      </tr>`;
+    }).join('');
+
+    document.querySelectorAll('#ticketBody select[data-nr]').forEach(el => el.addEventListener('change', onStatusChange));
+  }
+
+  async function loadTickets(){
+    const url = getBackendUrl();
+    if (!url){
+      $('setupBox').style.display = '';
+      showMsg('Bitte zuerst die Backend-Adresse eintragen (Zahnrad-Icon oben).', true);
+      $('ticketBody').innerHTML = '';
+      return;
+    }
+    showMsg('Lädt...', false);
+    try{
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      tickets = await res.json();
+      populateWhoAmI();
+      renderTable();
+      showMsg('', false);
+    }catch(err){
+      showMsg('Konnte Aufgaben nicht laden: ' + err.message, true);
+    }
+  }
+
+  async function onStatusChange(e){
+    const nr = e.target.dataset.nr;
+    const status = e.target.value;
+    const t = tickets.find(x => String(x.nr) === String(nr));
+    if (t) t.status = status;
+    try{
+      const res = await fetch(getBackendUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'setStatus', nr, status, updatedBy: whoAmI })
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'unbekannter Fehler');
+      showMsg('✓ Status gespeichert.', false);
+    }catch(err){
+      showMsg('Status konnte nicht gespeichert werden: ' + err.message, true);
+    }
+  }
+
+  $('whoAmI').addEventListener('change', (e) => {
+    whoAmI = e.target.value;
+    localStorage.setItem(STORAGE_KEY_WHO, whoAmI);
+    renderTable();
+  });
+  $('showDone').addEventListener('change', renderTable);
+  $('search').addEventListener('input', renderTable);
+  $('refreshBtn').addEventListener('click', loadTickets);
+  $('settingsBtn').addEventListener('click', () => {
+    $('setupBox').style.display = $('setupBox').style.display === 'none' ? '' : 'none';
+    $('backendUrlInput').value = getBackendUrl();
+  });
+  $('saveBackendBtn').addEventListener('click', () => {
+    localStorage.setItem(STORAGE_KEY_URL, $('backendUrlInput').value.trim());
+    $('setupBox').style.display = 'none';
+    loadTickets();
+  });
+
+  loadTickets();
+  setInterval(loadTickets, 60000);
+})();
+</script>
+</body>
+</html>
