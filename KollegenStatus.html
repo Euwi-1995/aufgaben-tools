@@ -272,7 +272,7 @@
     renderTable();
   });
   $('showDone').addEventListener('change', (e) => {
-    $('doneRangeRow').style.display = e.target.checked ? '' : 'none';
+    $('doneRangeRow').style.display = e.target.checked ? 'flex' : 'none';
     renderTable();
   });
   $('doneFrom').addEventListener('change', renderTable);
