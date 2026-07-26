@@ -22,7 +22,7 @@
   .card{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
   .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   label{ font-size:12.5px; color:var(--muted); }
-  select, input[type=text]{
+  select, input[type=text], input[type=date]{
     padding:7px 9px; border:1px solid var(--border-strong); border-radius:6px; font-size:13.5px; font-family:inherit;
   }
   button{
@@ -40,13 +40,18 @@
   #setupBox textarea{ width:100%; min-height:70px; font-family:monospace; font-size:12.5px; padding:8px; border:1px solid var(--border-strong); border-radius:6px; }
   .flag-row{ display:flex; gap:4px; flex-wrap:wrap; }
   .flag-toggle-sm{
-    border:1px solid var(--border-strong); background:#f2f2f4; border-radius:6px;
-    padding:3px 6px; font-size:13px; line-height:1.3; cursor:pointer;
-    opacity:.5; filter:grayscale(1); font-family:inherit;
+    border:1px solid var(--border-strong); background:#eceef1; color:#a7aab4; border-radius:6px;
+    padding:4px 7px; font-size:14px; line-height:1.2; cursor:pointer; font-family:inherit;
+    filter:grayscale(1); opacity:.6;
   }
-  .flag-toggle-sm.active{ opacity:1; filter:none; background:var(--accent-bg); border-color:var(--accent); }
-  .flag-toggle-sm.flag-toggle-done.active{ background:#e3f6e8; border-color:#1e8e5a; }
+  .flag-toggle-sm.active{ filter:none; opacity:1; color:#fff; font-weight:700; border-color:transparent; }
+  .flag-toggle-sm[data-flag="bearbeitung"].active{ background:#2f5fdd; }
+  .flag-toggle-sm[data-flag="kundeInformiert"].active{ background:#8b5cf6; }
+  .flag-toggle-sm[data-flag="wartestellung"].active{ background:#e08b1b; }
+  .flag-toggle-sm[data-flag="rueckgestellt"].active{ background:#64748b; }
+  .flag-toggle-sm[data-flag="erledigt"].active{ background:#1e8e5a; }
   .flag-toggle-sm.flag-static{ cursor:default; display:inline-block; }
+  #doneRangeRow{ display:none; }
 </style>
 </head>
 <body>
@@ -60,6 +65,10 @@
         <select id="whoAmI"></select>
       </label>
       <label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="showDone"> auch erledigte anzeigen</label>
+      <span class="row" id="doneRangeRow">
+        <label>von <input type="date" id="doneFrom"></label>
+        <label>bis <input type="date" id="doneTo"></label>
+      </span>
       <input type="text" id="search" placeholder="Suche...">
       <span style="flex:1;"></span>
       <button type="button" id="refreshBtn">🔄 Aktualisieren</button>
@@ -119,6 +128,10 @@
   function encodeFlags(set){
     return FLAG_DEFS.map(f => f.key).filter(k => set.has(k)).join(',');
   }
+  function todayStr(){
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
 
   let tickets = [];
   let whoAmI = localStorage.getItem(STORAGE_KEY_WHO) || '';
@@ -146,12 +159,21 @@
 
   function renderTable(){
     const showDone = $('showDone').checked;
+    const doneFrom = $('doneFrom').value;
+    const doneTo = $('doneTo').value;
     const q = $('search').value.trim().toLowerCase();
     // Ohne Auswahl bei "Wer bist du?": alle Aufgaben, nur zur Übersicht (nicht bearbeitbar - es gibt
     // niemanden, dem eine Änderung zugeschrieben werden könnte). Sobald ein Name ausgewählt ist: nur
-    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar.
+    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar. Bei "auch erledigte
+    // anzeigen" kann zusätzlich ein Von/Bis-Zeitraum (nach completedAt) eingegrenzt werden.
     const rows = tickets.filter(t => {
-      if (!showDone && parseFlags(t.status).has('erledigt')) return false;
+      const isDone = parseFlags(t.status).has('erledigt');
+      if (!showDone && isDone) return false;
+      if (showDone && isDone){
+        const c = (t.completedAt || '').slice(0,10);
+        if (doneFrom && (!c || c < doneFrom)) return false;
+        if (doneTo && (!c || c > doneTo)) return false;
+      }
       if (whoAmI){
         const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
         if (!assigneeList.includes(whoAmI)) return false;
@@ -178,7 +200,7 @@
       const activeSet = parseFlags(t.status);
       const flagCells = FLAG_DEFS.map(f => {
         const active = activeSet.has(f.key);
-        const cls = 'flag-toggle-sm' + (active ? ' active' : '') + (f.key === 'erledigt' ? ' flag-toggle-done' : '');
+        const cls = 'flag-toggle-sm' + (active ? ' active' : '');
         if (mine){
           return `<button type="button" class="${cls}" data-nr="${escapeHtml(t.nr)}" data-flag="${f.key}" title="${escapeHtml(f.label)}">${f.icon}</button>`;
         }
@@ -226,12 +248,15 @@
     if (set.has(flag)) set.delete(flag); else set.add(flag);
     const newStatus = encodeFlags(set);
     t.status = newStatus;
+    // completedAt wird hier gesetzt/geloescht, wenn "erledigt" gerade an- bzw. ausgeschaltet wurde -
+    // so kann die Von/Bis-Uebersicht ueber erledigte Aufgaben nach diesem Datum filtern.
+    t.completedAt = set.has('erledigt') ? todayStr() : '';
     renderTable();
     try{
       const res = await fetch(getBackendUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'setStatus', nr, status: newStatus, updatedBy: whoAmI })
+        body: JSON.stringify({ action: 'setStatus', nr, status: newStatus, updatedBy: whoAmI, completedAt: t.completedAt })
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'unbekannter Fehler');
@@ -246,7 +271,12 @@
     localStorage.setItem(STORAGE_KEY_WHO, whoAmI);
     renderTable();
   });
-  $('showDone').addEventListener('change', renderTable);
+  $('showDone').addEventListener('change', (e) => {
+    $('doneRangeRow').style.display = e.target.checked ? '' : 'none';
+    renderTable();
+  });
+  $('doneFrom').addEventListener('change', renderTable);
+  $('doneTo').addEventListener('change', renderTable);
   $('search').addEventListener('input', renderTable);
   $('refreshBtn').addEventListener('click', loadTickets);
   $('settingsBtn').addEventListener('click', () => {
