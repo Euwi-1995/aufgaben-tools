@@ -64,7 +64,7 @@
       <label>Wer bist du?
         <select id="whoAmI"></select>
       </label>
-      <label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="showDone"> auch erledigte anzeigen</label>
+      <label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="showDone"> erledigte anzeigen</label>
       <span class="row" id="doneRangeRow">
         <label>von <input type="date" id="doneFrom"></label>
         <label>bis <input type="date" id="doneTo"></label>
@@ -273,10 +273,13 @@
   });
   $('showDone').addEventListener('change', (e) => {
     $('doneRangeRow').style.display = e.target.checked ? 'flex' : 'none';
-    renderTable();
+    if (e.target.checked) loadTickets(); else renderTable();
   });
-  $('doneFrom').addEventListener('change', renderTable);
-  $('doneTo').addEventListener('change', renderTable);
+  // Bei Änderung des Von/Bis-Zeitraums zusätzlich frisch vom Server laden (nicht nur die
+  // schon geladene Liste neu filtern) - damit auch erledigte Aufgaben auftauchen, die ein
+  // Kollege gerade eben erst (z.B. innerhalb der letzten Minute) erledigt gesetzt hat.
+  $('doneFrom').addEventListener('change', loadTickets);
+  $('doneTo').addEventListener('change', loadTickets);
   $('search').addEventListener('input', renderTable);
   $('refreshBtn').addEventListener('click', loadTickets);
   $('settingsBtn').addEventListener('click', () => {
