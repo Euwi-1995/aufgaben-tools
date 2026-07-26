@@ -44,7 +44,7 @@
 <body>
 <div class="wrap">
   <h1>📋 Aufgaben-Status</h1>
-  <p class="hint">Status deiner Aufgaben eintragen. Du siehst alle Aufgaben, ändern kannst du nur deine eigenen (blau hinterlegt).</p>
+  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben (nur zur Übersicht). Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen Aufgaben.</p>
 
   <div class="card">
     <div class="row">
@@ -95,7 +95,7 @@
   const KNOWN_PERSONS = ['Eugenia','Frank','Matthias','Thorsten','Bertram','Kevin','Daniel','Ali','Philip','Alex','Benedikt'];
   const STATUS_LABELS = {
     in_bearbeitung: 'in Bearbeitung',
-    an_kunde_gemeldet: 'an Kunde gemeldet',
+    an_kunde_gemeldet: 'Kunden informiert',
     wartestellung: 'Wartestellung',
     erledigt: 'erledigt'
   };
@@ -127,8 +127,16 @@
   function renderTable(){
     const showDone = $('showDone').checked;
     const q = $('search').value.trim().toLowerCase();
+    // Ohne Auswahl bei "Wer bist du?": alle Aufgaben, nur zur Übersicht (nicht bearbeitbar - es gibt
+    // niemanden, dem eine Änderung zugeschrieben werden könnte). Sobald ein Name ausgewählt ist: nur
+    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar (kein Lesezugriff-Zustand
+    // mehr für andere, weil andere Aufgaben in dieser Ansicht schlicht nicht mehr auftauchen).
     const rows = tickets.filter(t => {
       if (!showDone && t.status === 'erledigt') return false;
+      if (whoAmI){
+        const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (!assigneeList.includes(whoAmI)) return false;
+      }
       if (q){
         const hay = [t.text, t.kunde, t.projekt, t.assignees, 'ticket ' + t.nr].filter(Boolean).join(' ').toLowerCase();
         if (!hay.includes(q)) return false;
@@ -137,13 +145,12 @@
     }).sort((a,b) => (a.status === 'erledigt') - (b.status === 'erledigt') || String(a.nr).localeCompare(String(b.nr), 'de', { numeric:true }));
 
     if (!rows.length){
-      $('ticketBody').innerHTML = '<tr><td colspan="5" class="empty">Keine Aufgaben in dieser Ansicht.</td></tr>';
+      $('ticketBody').innerHTML = `<tr><td colspan="5" class="empty">${whoAmI ? 'Keine eigenen Aufgaben in dieser Ansicht.' : 'Keine Aufgaben in dieser Ansicht.'}</td></tr>`;
       return;
     }
 
     $('ticketBody').innerHTML = rows.map(t => {
-      const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
-      const mine = whoAmI && assigneeList.includes(whoAmI);
+      const mine = !!whoAmI;
       const kp = [t.kunde, t.projekt].filter(Boolean).join(' / ');
       const statusCell = mine
         ? `<select data-nr="${escapeHtml(t.nr)}">${Object.keys(STATUS_LABELS).map(v => `<option value="${v}" ${t.status === v ? 'selected' : ''}>${STATUS_LABELS[v]}</option>`).join('')}</select>`
