@@ -52,12 +52,18 @@
   .flag-toggle-sm[data-flag="erledigt"].active{ background:#1e8e5a; }
   .flag-toggle-sm.flag-static{ cursor:default; display:inline-block; }
   #doneRangeRow{ display:none; }
+  .rang{
+    display:inline-block; min-width:24px; text-align:center; border-radius:6px;
+    padding:3px 6px; font-size:12.5px; font-weight:700;
+  }
+  .rang-top{ background:#2f5fdd; color:#fff; }
+  .rang-none{ background:transparent; color:var(--hint); font-weight:400; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>📋 Aufgaben-Status</h1>
-  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert").</p>
+  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert"). Die Spalte <b>Rang</b> zeigt die von Eugenia festgelegte Reihenfolge: <b>1 zuerst erledigen</b>, danach 2, 3 usw. Aufgaben ohne Rang stehen darunter.</p>
 
   <div class="card">
     <div class="row">
@@ -90,7 +96,7 @@
     <div style="overflow:auto;">
       <table>
         <thead>
-          <tr><th>Ticket</th><th>Titel</th><th>Kunde / Projekt</th><th>Zuständig</th><th>Status</th></tr>
+          <tr><th title="Reihenfolge – 1 zuerst erledigen">Rang</th><th>Ticket</th><th>Titel</th><th>Kunde / Projekt</th><th>Zuständig</th><th>Status</th></tr>
         </thead>
         <tbody id="ticketBody"></tbody>
       </table>
@@ -128,23 +134,49 @@
   function parseStatus(status){
     const set = new Set();
     let doneDate = '';
+    const ranks = {};
+    const extras = [];   // unbekannte Token unveraendert aufheben, damit sie beim
+                         // Zurueckschreiben nicht verloren gehen
     (status || '').split(',').map(s => s.trim()).filter(Boolean).forEach(tok => {
       const at = tok.indexOf('@');
       const key = at === -1 ? tok : tok.slice(0, at);
-      const date = at === -1 ? '' : tok.slice(at + 1);
-      set.add(key);
-      if (key === 'erledigt' && date) doneDate = date;
+      const rest = at === -1 ? '' : tok.slice(at + 1);
+      if (key === 'rang'){
+        // "rang@Frank=2" - die von Eugenia in AufgabenV2 festgelegte Reihenfolge je Kollege
+        const eq = rest.lastIndexOf('=');
+        if (eq > 0){
+          const n = parseInt(rest.slice(eq + 1), 10);
+          if (!isNaN(n)) ranks[rest.slice(0, eq)] = n;
+        }
+        extras.push(tok);
+        return;
+      }
+      if (FLAG_DEFS.some(f => f.key === key)){
+        set.add(key);
+        if (key === 'erledigt' && rest) doneDate = rest;
+      } else {
+        extras.push(tok);
+      }
     });
-    return { set, doneDate };
+    return { set, doneDate, ranks, extras };
   }
   function parseFlags(status){
     return parseStatus(status).set;
   }
-  function encodeFlags(set, doneDate){
-    return FLAG_DEFS.map(f => f.key)
+  function encodeFlags(set, doneDate, extras){
+    const parts = FLAG_DEFS.map(f => f.key)
       .filter(k => set.has(k))
-      .map(k => (k === 'erledigt' && doneDate) ? ('erledigt@' + doneDate) : k)
-      .join(',');
+      .map(k => (k === 'erledigt' && doneDate) ? ('erledigt@' + doneDate) : k);
+    return parts.concat(extras || []).join(',');
+  }
+  // Rang der Aufgabe aus Sicht des aktuell gewaehlten Kollegen. Ohne Auswahl (Uebersicht)
+  // zaehlt der niedrigste vergebene Rang, damit Dringendes auch dort oben steht.
+  // Rueckgabe: Zahl oder null (kein Rang vergeben).
+  function rankFor(t, who){
+    const ranks = parseStatus(t.status).ranks;
+    if (who) return (ranks[who] != null) ? ranks[who] : null;
+    const all = Object.keys(ranks).map(k => ranks[k]).filter(n => n != null);
+    return all.length ? Math.min.apply(null, all) : null;
   }
   // Erledigt-Datum einer Aufgabe: bevorzugt aus dem Status-Text, ersatzweise aus einem
   // completedAt-Feld (falls das Backend spaeter doch eine eigene Spalte bekommt).
@@ -214,13 +246,18 @@
     }).sort((a,b) => {
       const da = parseFlags(a.status).has('erledigt') ? 1 : 0;
       const db = parseFlags(b.status).has('erledigt') ? 1 : 0;
-      return da - db || String(a.nr).localeCompare(String(b.nr), 'de', { numeric:true });
+      // Reihenfolge: erledigte nach unten, danach die von Eugenia vergebene Rangfolge
+      // (Rang 1 zuerst), Aufgaben ohne Rang darunter, zuletzt nach Ticketnummer.
+      const ra = rankFor(a, whoAmI), rb = rankFor(b, whoAmI);
+      const ka = (ra == null) ? Number.MAX_SAFE_INTEGER : ra;
+      const kb = (rb == null) ? Number.MAX_SAFE_INTEGER : rb;
+      return da - db || ka - kb || String(a.nr).localeCompare(String(b.nr), 'de', { numeric:true });
     });
 
     if (!rows.length){
       const wer = whoAmI ? 'eigenen ' : '';
       const art = showDone ? 'erledigten' : 'offenen';
-      $('ticketBody').innerHTML = `<tr><td colspan="5" class="empty">Keine ${wer}${art} Aufgaben in dieser Ansicht.</td></tr>`;
+      $('ticketBody').innerHTML = `<tr><td colspan="6" class="empty">Keine ${wer}${art} Aufgaben in dieser Ansicht.</td></tr>`;
       return;
     }
 
@@ -236,7 +273,12 @@
         }
         return `<span class="${cls} flag-static" title="${escapeHtml(f.label)}">${f.icon}</span>`;
       }).join('');
+      const r = rankFor(t, whoAmI);
+      const rangCell = (r != null)
+        ? `<span class="rang rang-top">${r}</span>`
+        : `<span class="rang rang-none" title="keine Reihenfolge vergeben">–</span>`;
       return `<tr class="${mine ? 'mine' : ''}">
+        <td>${rangCell}</td>
         <td class="ticket">#${escapeHtml(t.nr)}</td>
         <td>${escapeHtml(t.text)}</td>
         <td>${escapeHtml(kp)}</td>
@@ -281,7 +323,9 @@
     // erledigt, bleibt das urspruengliche Datum erhalten (nicht bei jedem Klick neu setzen).
     // Beim Abschalten faellt das Datum weg.
     const doneDate = set.has('erledigt') ? (parsed.doneDate || todayStr()) : '';
-    const newStatus = encodeFlags(set, doneDate);
+    // parsed.extras enthaelt u.a. die Rang-Token - die muessen erhalten bleiben, sonst
+    // wuerde ein Klick auf ein Status-Symbol Eugenias Reihenfolge loeschen.
+    const newStatus = encodeFlags(set, doneDate, parsed.extras);
     t.status = newStatus;
     t.completedAt = doneDate;
     renderTable();
