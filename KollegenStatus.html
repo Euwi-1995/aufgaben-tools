@@ -51,6 +51,8 @@
   .flag-toggle-sm[data-flag="rueckgestellt"].active{ background:#64748b; }
   .flag-toggle-sm[data-flag="erledigt"].active{ background:#1e8e5a; }
   .flag-toggle-sm.flag-static{ cursor:default; display:inline-block; }
+  /* Auf dem Rechner nur das Symbol - die Bedeutung kommt per Tooltip beim Draufzeigen. */
+  .flag-label{ display:none; }
   #doneRangeRow{ display:none; }
   .rang{
     display:inline-block; min-width:24px; text-align:center; border-radius:6px;
@@ -105,9 +107,18 @@
     td[data-label="Zuständig"]:not(:empty)::before{ content:"Zuständig: "; color:var(--muted); }
     td[data-label="Kunde / Projekt"], td[data-label="Zuständig"]{ font-size:12.5px; color:var(--text); }
 
+    /* Auf dem Handy gibt es kein "Draufzeigen" - reine Symbole sind dort nicht verstaendlich.
+       Deshalb steht die Beschriftung neben dem Symbol, in einem 2-spaltigen Raster.
+       "erledigt" bekommt als wichtigste Aktion die volle Breite in der letzten Zeile. */
     td[data-label="Status"]{ margin-top:10px; }
-    .flag-row{ gap:6px; }
-    .flag-toggle-sm{ padding:9px 13px; font-size:17px; }   /* groessere Tippflaeche */
+    .flag-row{ display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .flag-toggle-sm{
+      display:flex; align-items:center; gap:7px; text-align:left;
+      padding:10px 10px; font-size:16px; line-height:1.2;
+    }
+    .flag-toggle-sm[data-flag="erledigt"], .flag-static:last-child{ grid-column:1 / -1; }
+    .flag-label{ display:inline; font-size:12.5px; font-weight:600; }
+    .flag-toggle-sm:not(.active) .flag-label{ color:#6f727c; }
     .rang{ font-size:13px; padding:4px 8px; }
     .empty{ background:var(--panel); border:1px solid var(--border); border-radius:10px; }
   }
@@ -320,13 +331,17 @@
       const mine = !!whoAmI;
       const kp = [t.kunde, t.projekt].filter(Boolean).join(' / ');
       const activeSet = parseFlags(t.status);
+      // Neben dem Symbol steht die Beschriftung im Markup mit drin. Auf dem Rechner ist sie
+      // ausgeblendet (dort reicht der Tooltip beim Draufzeigen), auf dem Handy wird sie
+      // eingeblendet - dort gibt es kein Draufzeigen, und reine Symbole sind nicht eindeutig.
       const flagCells = FLAG_DEFS.map(f => {
         const active = activeSet.has(f.key);
         const cls = 'flag-toggle-sm' + (active ? ' active' : '');
+        const inner = `<span class="flag-icon">${f.icon}</span><span class="flag-label">${escapeHtml(f.label)}</span>`;
         if (mine){
-          return `<button type="button" class="${cls}" data-nr="${escapeHtml(t.nr)}" data-flag="${f.key}" title="${escapeHtml(f.label)}">${f.icon}</button>`;
+          return `<button type="button" class="${cls}" data-nr="${escapeHtml(t.nr)}" data-flag="${f.key}" title="${escapeHtml(f.label)}" aria-label="${escapeHtml(f.label)}" aria-pressed="${active}">${inner}</button>`;
         }
-        return `<span class="${cls} flag-static" title="${escapeHtml(f.label)}">${f.icon}</span>`;
+        return `<span class="${cls} flag-static" title="${escapeHtml(f.label)}">${inner}</span>`;
       }).join('');
       const r = rankFor(t, whoAmI);
       const rangCell = (r != null)
