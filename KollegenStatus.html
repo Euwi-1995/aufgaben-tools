@@ -122,11 +122,35 @@
     { key: 'erledigt', label: 'erledigt', icon: '✅' }
   ];
 
-  function parseFlags(status){
-    return new Set((status || '').split(',').map(s => s.trim()).filter(Boolean));
+  // Das Erledigt-Datum steckt direkt im Status-Text ("erledigt@2026-07-19") statt in einer
+  // eigenen Sheet-Spalte - so braucht das Google-Sheet-Backend keine Aenderung. Ein reines
+  // "erledigt" ohne @-Datum bleibt weiterhin gueltig (dann eben ohne bekanntes Datum).
+  function parseStatus(status){
+    const set = new Set();
+    let doneDate = '';
+    (status || '').split(',').map(s => s.trim()).filter(Boolean).forEach(tok => {
+      const at = tok.indexOf('@');
+      const key = at === -1 ? tok : tok.slice(0, at);
+      const date = at === -1 ? '' : tok.slice(at + 1);
+      set.add(key);
+      if (key === 'erledigt' && date) doneDate = date;
+    });
+    return { set, doneDate };
   }
-  function encodeFlags(set){
-    return FLAG_DEFS.map(f => f.key).filter(k => set.has(k)).join(',');
+  function parseFlags(status){
+    return parseStatus(status).set;
+  }
+  function encodeFlags(set, doneDate){
+    return FLAG_DEFS.map(f => f.key)
+      .filter(k => set.has(k))
+      .map(k => (k === 'erledigt' && doneDate) ? ('erledigt@' + doneDate) : k)
+      .join(',');
+  }
+  // Erledigt-Datum einer Aufgabe: bevorzugt aus dem Status-Text, ersatzweise aus einem
+  // completedAt-Feld (falls das Backend spaeter doch eine eigene Spalte bekommt).
+  function completedDate(t){
+    const fromStatus = parseStatus(t.status).doneDate;
+    return fromStatus || (t.completedAt || '').slice(0, 10);
   }
   function todayStr(){
     const d = new Date();
@@ -172,7 +196,7 @@
       const isDone = parseFlags(t.status).has('erledigt');
       if (showDone){
         if (!isDone) return false;
-        const c = (t.completedAt || '').slice(0,10);
+        const c = completedDate(t);
         if (doneFrom && (!c || c < doneFrom)) return false;
         if (doneTo && (!c || c > doneTo)) return false;
       } else {
@@ -250,13 +274,16 @@
     const flag = e.currentTarget.dataset.flag;
     const t = tickets.find(x => String(x.nr) === String(nr));
     if (!t) return;
-    const set = parseFlags(t.status);
+    const parsed = parseStatus(t.status);
+    const set = parsed.set;
     if (set.has(flag)) set.delete(flag); else set.add(flag);
-    const newStatus = encodeFlags(set);
+    // Beim Anschalten von "erledigt" wird das heutige Datum vergeben; war es vorher schon
+    // erledigt, bleibt das urspruengliche Datum erhalten (nicht bei jedem Klick neu setzen).
+    // Beim Abschalten faellt das Datum weg.
+    const doneDate = set.has('erledigt') ? (parsed.doneDate || todayStr()) : '';
+    const newStatus = encodeFlags(set, doneDate);
     t.status = newStatus;
-    // completedAt wird hier gesetzt/geloescht, wenn "erledigt" gerade an- bzw. ausgeschaltet wurde -
-    // so kann die Von/Bis-Uebersicht ueber erledigte Aufgaben nach diesem Datum filtern.
-    t.completedAt = set.has('erledigt') ? todayStr() : '';
+    t.completedAt = doneDate;
     renderTable();
     try{
       const res = await fetch(getBackendUrl(), {
