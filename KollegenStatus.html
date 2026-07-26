@@ -164,15 +164,19 @@
     const q = $('search').value.trim().toLowerCase();
     // Ohne Auswahl bei "Wer bist du?": alle Aufgaben, nur zur Übersicht (nicht bearbeitbar - es gibt
     // niemanden, dem eine Änderung zugeschrieben werden könnte). Sobald ein Name ausgewählt ist: nur
-    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar. Bei "auch erledigte
-    // anzeigen" kann zusätzlich ein Von/Bis-Zeitraum (nach completedAt) eingegrenzt werden.
+    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar. "erledigte anzeigen"
+    // ist ein echter Umschalter (nicht "zusätzlich anzeigen"): unangehakt nur offene Aufgaben,
+    // angehakt NUR erledigte (optional zusätzlich per Von/Bis nach completedAt eingegrenzt) - die
+    // beiden Ansichten werden nie gemischt.
     const rows = tickets.filter(t => {
       const isDone = parseFlags(t.status).has('erledigt');
-      if (!showDone && isDone) return false;
-      if (showDone && isDone){
+      if (showDone){
+        if (!isDone) return false;
         const c = (t.completedAt || '').slice(0,10);
         if (doneFrom && (!c || c < doneFrom)) return false;
         if (doneTo && (!c || c > doneTo)) return false;
+      } else {
+        if (isDone) return false;
       }
       if (whoAmI){
         const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -190,7 +194,9 @@
     });
 
     if (!rows.length){
-      $('ticketBody').innerHTML = `<tr><td colspan="5" class="empty">${whoAmI ? 'Keine eigenen Aufgaben in dieser Ansicht.' : 'Keine Aufgaben in dieser Ansicht.'}</td></tr>`;
+      const wer = whoAmI ? 'eigenen ' : '';
+      const art = showDone ? 'erledigten' : 'offenen';
+      $('ticketBody').innerHTML = `<tr><td colspan="5" class="empty">Keine ${wer}${art} Aufgaben in dieser Ansicht.</td></tr>`;
       return;
     }
 
