@@ -16,7 +16,7 @@
     margin:0; font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
     background:var(--bg); color:var(--text); font-size:14px;
   }
-  .wrap{ max-width:920px; margin:0 auto; padding:20px 16px 60px; }
+  .wrap{ max-width:980px; margin:0 auto; padding:20px 16px 60px; }
   h1{ font-size:18px; margin:0 0 4px; }
   .hint{ color:var(--muted); font-size:12.5px; margin:0 0 18px; }
   .card{ background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
@@ -34,17 +34,25 @@
   th{ font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.02em; font-weight:600; }
   tr.mine{ background:var(--accent-bg); }
   .ticket{ color:var(--accent); font-weight:700; font-size:12.5px; }
-  .status-text{ color:var(--muted); font-size:12.5px; }
   .empty{ padding:20px; text-align:center; color:var(--hint); }
   .error{ color:var(--danger); font-size:13px; }
   #setupBox{ display:none; }
   #setupBox textarea{ width:100%; min-height:70px; font-family:monospace; font-size:12.5px; padding:8px; border:1px solid var(--border-strong); border-radius:6px; }
+  .flag-row{ display:flex; gap:4px; flex-wrap:wrap; }
+  .flag-toggle-sm{
+    border:1px solid var(--border-strong); background:#f2f2f4; border-radius:6px;
+    padding:3px 6px; font-size:13px; line-height:1.3; cursor:pointer;
+    opacity:.5; filter:grayscale(1); font-family:inherit;
+  }
+  .flag-toggle-sm.active{ opacity:1; filter:none; background:var(--accent-bg); border-color:var(--accent); }
+  .flag-toggle-sm.flag-toggle-done.active{ background:#e3f6e8; border-color:#1e8e5a; }
+  .flag-toggle-sm.flag-static{ cursor:default; display:inline-block; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>📋 Aufgaben-Status</h1>
-  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben (nur zur Übersicht). Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen Aufgaben.</p>
+  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert").</p>
 
   <div class="card">
     <div class="row">
@@ -93,12 +101,24 @@
   const STORAGE_KEY_WHO = 'kollegenStatusWhoAmI';
 
   const KNOWN_PERSONS = ['Eugenia','Frank','Matthias','Thorsten','Bertram','Kevin','Daniel','Ali','Philip','Alex','Benedikt'];
-  const STATUS_LABELS = {
-    in_bearbeitung: 'in Bearbeitung',
-    an_kunde_gemeldet: 'Kunden informiert',
-    wartestellung: 'Wartestellung',
-    erledigt: 'erledigt'
-  };
+
+  // Fuenf unabhaengige An/Aus-Zustaende statt einer exklusiven Auswahl - mehrere koennen
+  // gleichzeitig aktiv sein (z.B. "in Bearbeitung" UND "Kunden informiert"). Werden als
+  // kommagetrennte Liste aktiver Kurzschluessel im Sheet abgelegt (z.B. "bearbeitung,kundeInformiert").
+  const FLAG_DEFS = [
+    { key: 'bearbeitung', label: 'in Bearbeitung', icon: '🔧' },
+    { key: 'kundeInformiert', label: 'Kunden informiert', icon: '📨' },
+    { key: 'wartestellung', label: 'Wartestellung', icon: '⏳' },
+    { key: 'rueckgestellt', label: 'Rückgestellt', icon: '⏸' },
+    { key: 'erledigt', label: 'erledigt', icon: '✅' }
+  ];
+
+  function parseFlags(status){
+    return new Set((status || '').split(',').map(s => s.trim()).filter(Boolean));
+  }
+  function encodeFlags(set){
+    return FLAG_DEFS.map(f => f.key).filter(k => set.has(k)).join(',');
+  }
 
   let tickets = [];
   let whoAmI = localStorage.getItem(STORAGE_KEY_WHO) || '';
@@ -129,10 +149,9 @@
     const q = $('search').value.trim().toLowerCase();
     // Ohne Auswahl bei "Wer bist du?": alle Aufgaben, nur zur Übersicht (nicht bearbeitbar - es gibt
     // niemanden, dem eine Änderung zugeschrieben werden könnte). Sobald ein Name ausgewählt ist: nur
-    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar (kein Lesezugriff-Zustand
-    // mehr für andere, weil andere Aufgaben in dieser Ansicht schlicht nicht mehr auftauchen).
+    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar.
     const rows = tickets.filter(t => {
-      if (!showDone && t.status === 'erledigt') return false;
+      if (!showDone && parseFlags(t.status).has('erledigt')) return false;
       if (whoAmI){
         const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
         if (!assigneeList.includes(whoAmI)) return false;
@@ -142,7 +161,11 @@
         if (!hay.includes(q)) return false;
       }
       return true;
-    }).sort((a,b) => (a.status === 'erledigt') - (b.status === 'erledigt') || String(a.nr).localeCompare(String(b.nr), 'de', { numeric:true }));
+    }).sort((a,b) => {
+      const da = parseFlags(a.status).has('erledigt') ? 1 : 0;
+      const db = parseFlags(b.status).has('erledigt') ? 1 : 0;
+      return da - db || String(a.nr).localeCompare(String(b.nr), 'de', { numeric:true });
+    });
 
     if (!rows.length){
       $('ticketBody').innerHTML = `<tr><td colspan="5" class="empty">${whoAmI ? 'Keine eigenen Aufgaben in dieser Ansicht.' : 'Keine Aufgaben in dieser Ansicht.'}</td></tr>`;
@@ -152,19 +175,25 @@
     $('ticketBody').innerHTML = rows.map(t => {
       const mine = !!whoAmI;
       const kp = [t.kunde, t.projekt].filter(Boolean).join(' / ');
-      const statusCell = mine
-        ? `<select data-nr="${escapeHtml(t.nr)}">${Object.keys(STATUS_LABELS).map(v => `<option value="${v}" ${t.status === v ? 'selected' : ''}>${STATUS_LABELS[v]}</option>`).join('')}</select>`
-        : `<span class="status-text">${escapeHtml(STATUS_LABELS[t.status] || t.status || '–')}</span>`;
+      const activeSet = parseFlags(t.status);
+      const flagCells = FLAG_DEFS.map(f => {
+        const active = activeSet.has(f.key);
+        const cls = 'flag-toggle-sm' + (active ? ' active' : '') + (f.key === 'erledigt' ? ' flag-toggle-done' : '');
+        if (mine){
+          return `<button type="button" class="${cls}" data-nr="${escapeHtml(t.nr)}" data-flag="${f.key}" title="${escapeHtml(f.label)}">${f.icon}</button>`;
+        }
+        return `<span class="${cls} flag-static" title="${escapeHtml(f.label)}">${f.icon}</span>`;
+      }).join('');
       return `<tr class="${mine ? 'mine' : ''}">
         <td class="ticket">#${escapeHtml(t.nr)}</td>
         <td>${escapeHtml(t.text)}</td>
         <td>${escapeHtml(kp)}</td>
         <td>${escapeHtml(t.assignees || '')}</td>
-        <td>${statusCell}</td>
+        <td><div class="flag-row">${flagCells}</div></td>
       </tr>`;
     }).join('');
 
-    document.querySelectorAll('#ticketBody select[data-nr]').forEach(el => el.addEventListener('change', onStatusChange));
+    document.querySelectorAll('#ticketBody button[data-flag]').forEach(el => el.addEventListener('click', onFlagToggle));
   }
 
   async function loadTickets(){
@@ -188,16 +217,21 @@
     }
   }
 
-  async function onStatusChange(e){
-    const nr = e.target.dataset.nr;
-    const status = e.target.value;
+  async function onFlagToggle(e){
+    const nr = e.currentTarget.dataset.nr;
+    const flag = e.currentTarget.dataset.flag;
     const t = tickets.find(x => String(x.nr) === String(nr));
-    if (t) t.status = status;
+    if (!t) return;
+    const set = parseFlags(t.status);
+    if (set.has(flag)) set.delete(flag); else set.add(flag);
+    const newStatus = encodeFlags(set);
+    t.status = newStatus;
+    renderTable();
     try{
       const res = await fetch(getBackendUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'setStatus', nr, status, updatedBy: whoAmI })
+        body: JSON.stringify({ action: 'setStatus', nr, status: newStatus, updatedBy: whoAmI })
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'unbekannter Fehler');
