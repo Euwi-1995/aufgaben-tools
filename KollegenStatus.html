@@ -60,6 +60,15 @@
   }
   .rang-top{ background:#2f5fdd; color:#fff; }
   .rang-none{ background:transparent; color:var(--hint); font-weight:400; }
+  .task-dates{ font-size:11.5px; color:var(--muted); margin-top:3px; }
+  .due-over{ color:var(--danger); font-weight:600; }
+  .handover-row{ margin-top:5px; }
+  .handover-row select{ font-size:12px; padding:4px 6px; max-width:100%; }
+  .handover-note{ margin-top:5px; font-size:12px; color:var(--warn); }
+  .link-btn{
+    border:none; background:none; color:var(--accent); text-decoration:underline;
+    cursor:pointer; font-size:12px; padding:0 0 0 4px;
+  }
 
   /* ---------- Handy-Ansicht ----------
      Auf schmalen Bildschirmen laesst sich eine 6-spaltige Tabelle nicht sinnvoll darstellen -
@@ -106,6 +115,8 @@
     td[data-label="Kunde / Projekt"]:not(:empty)::before{ content:"Kunde: "; color:var(--muted); }
     td[data-label="Zuständig"]:not(:empty)::before{ content:"Zuständig: "; color:var(--muted); }
     td[data-label="Kunde / Projekt"], td[data-label="Zuständig"]{ font-size:12.5px; color:var(--text); }
+    .task-dates{ font-size:12px; margin-top:4px; }
+    .handover-row select{ width:100%; font-size:15px; padding:9px 8px; margin-top:4px; }
 
     /* Auf dem Handy gibt es kein "Draufzeigen" - reine Symbole sind dort nicht verstaendlich.
        Deshalb steht die Beschriftung neben dem Symbol, in einem 2-spaltigen Raster.
@@ -200,6 +211,10 @@
   function parseStatus(status){
     const set = new Set();
     let doneDate = '';
+    let createdAt = '';
+    let dueDate = '';
+    let handoverFrom = '';
+    let handoverTo = '';
     const ranks = {};
     const extras = [];   // unbekannte Token unveraendert aufheben, damit sie beim
                          // Zurueckschreiben nicht verloren gehen
@@ -217,6 +232,18 @@
         extras.push(tok);
         return;
       }
+      if (key === 'erstellt'){ createdAt = rest; extras.push(tok); return; }
+      if (key === 'faellig'){ dueDate = rest; extras.push(tok); return; }
+      if (key === 'uebergabe'){
+        // "uebergabe@Frank>Kevin" - offener Uebergabe-Wunsch. Wird NICHT nach extras
+        // uebernommen: beim naechsten Klick soll immer nur der aktuellste Wunsch drinstehen.
+        const gt = rest.indexOf('>');
+        if (gt > 0){
+          handoverFrom = rest.slice(0, gt).trim();
+          handoverTo = rest.slice(gt + 1).trim();
+        }
+        return;
+      }
       if (FLAG_DEFS.some(f => f.key === key)){
         set.add(key);
         if (key === 'erledigt' && rest) doneDate = rest;
@@ -224,8 +251,16 @@
         extras.push(tok);
       }
     });
-    return { set, doneDate, ranks, extras };
+    return { set, doneDate, createdAt, dueDate, handoverFrom, handoverTo, ranks, extras };
   }
+
+  // 2026-07-08 -> 08.07.2026 (leere/ungueltige Werte bleiben leer)
+  function fmtDate(iso){
+    if (!iso) return '';
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.slice(0, 10));
+    return m ? `${m[3]}.${m[2]}.${m[1]}` : '';
+  }
+  function todayIso(){ return todayStr(); }
   function parseFlags(status){
     return parseStatus(status).set;
   }
@@ -272,10 +307,16 @@
     el.innerHTML = isError ? `<span class="error">${escapeHtml(text)}</span>` : escapeHtml(text);
   }
 
-  function populateWhoAmI(){
+  // Alle bekannten Personen (feste Liste + alle, die in den Daten als zuständig vorkommen).
+  // Wird sowohl für "Wer bist du?" als auch für die Übergabe-Auswahl verwendet.
+  function personOptions(){
     const present = new Set(KNOWN_PERSONS);
     tickets.forEach(t => (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean).forEach(p => present.add(p)));
-    const list = [...present];
+    return [...present];
+  }
+
+  function populateWhoAmI(){
+    const list = personOptions();
     $('whoAmI').innerHTML = '<option value="">– auswählen –</option>' + list.map(p => `<option value="${escapeHtml(p)}" ${p === whoAmI ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('');
   }
 
@@ -347,19 +388,83 @@
       const rangCell = (r != null)
         ? `<span class="rang rang-top">${r}</span>`
         : `<span class="rang rang-none" title="keine Reihenfolge vergeben">–</span>`;
+
+      // Erstell-/Fälligkeitsdatum als kleine Zeile unter dem Titel (statt eigener Spalten -
+      // die Tabelle wäre sonst zu breit, und auf dem Handy passt es so besser in die Karte).
+      const ps = parseStatus(t.status);
+      const dateBits = [];
+      if (ps.createdAt) dateBits.push(`erstellt ${fmtDate(ps.createdAt)}`);
+      if (ps.dueDate){
+        const overdue = !activeSet.has('erledigt') && ps.dueDate < todayIso();
+        dateBits.push(`<span class="${overdue ? 'due-over' : ''}">fällig ${fmtDate(ps.dueDate)}</span>`);
+      }
+      const dateLine = dateBits.length ? `<div class="task-dates">${dateBits.join(' · ')}</div>` : '';
+
+      // Übergabe an einen anderen Kollegen: nur sichtbar, wenn man sich ausgewählt hat.
+      // Ein bereits gestellter Wunsch wird angezeigt, bis Eugenia das nächste Mal abgleicht.
+      let handoverHtml = '';
+      if (ps.handoverTo){
+        handoverHtml = `<div class="handover-note">→ Übergabe an <b>${escapeHtml(ps.handoverTo)}</b> vorgemerkt
+          <button type="button" class="link-btn" data-undo-handover="${escapeHtml(t.nr)}">rückgängig</button></div>`;
+      } else if (mine){
+        const opts = personOptions().filter(p => p !== whoAmI)
+          .map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+        handoverHtml = `<div class="handover-row">
+          <select data-handover-nr="${escapeHtml(t.nr)}"><option value="">👤 übergeben an …</option>${opts}</select>
+        </div>`;
+      }
+
       // data-label steuert die Handy-Ansicht (siehe @media-Block im CSS): dort wird aus jeder
       // Zeile eine Karte, und die Beschriftungen kommen aus diesen Attributen.
       return `<tr class="${mine ? 'mine' : ''}">
         <td data-label="Rang">${rangCell}</td>
         <td data-label="Ticket" class="ticket">#${escapeHtml(t.nr)}</td>
-        <td data-label="Titel">${escapeHtml(t.text)}</td>
+        <td data-label="Titel">${escapeHtml(t.text)}${dateLine}</td>
         <td data-label="Kunde / Projekt">${escapeHtml(kp)}</td>
-        <td data-label="Zuständig">${escapeHtml(t.assignees || '')}</td>
+        <td data-label="Zuständig">${escapeHtml(t.assignees || '')}${handoverHtml}</td>
         <td data-label="Status"><div class="flag-row">${flagCells}</div></td>
       </tr>`;
     }).join('');
 
     document.querySelectorAll('#ticketBody button[data-flag]').forEach(el => el.addEventListener('click', onFlagToggle));
+    document.querySelectorAll('#ticketBody select[data-handover-nr]').forEach(el => el.addEventListener('change', onHandover));
+    document.querySelectorAll('#ticketBody button[data-undo-handover]').forEach(el => el.addEventListener('click', onUndoHandover));
+  }
+
+  // Übergabe an einen anderen Kollegen. Die Web-Ansicht darf im Sheet nur die status-Spalte
+  // beschreiben, deshalb wird die Übergabe dort als Wunsch vermerkt ("uebergabe@Frank>Kevin").
+  // Tatsächlich umgehängt wird die Aufgabe beim nächsten Abgleich in Eugenias Aufgabenverwaltung;
+  // danach verschwindet der Vermerk automatisch wieder.
+  async function setHandover(nr, to){
+    const t = tickets.find(x => String(x.nr) === String(nr));
+    if (!t) return;
+    const parsed = parseStatus(t.status);
+    const extras = parsed.extras.slice();
+    if (to) extras.push('uebergabe@' + whoAmI + '>' + to);
+    const newStatus = encodeFlags(parsed.set, parsed.doneDate, extras);
+    t.status = newStatus;
+    renderTable();
+    try{
+      const res = await fetch(getBackendUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'setStatus', nr, status: newStatus, updatedBy: whoAmI, completedAt: parsed.doneDate || '' })
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || 'unbekannter Fehler');
+      showMsg(to ? `✓ Übergabe an ${to} vorgemerkt.` : '✓ Übergabe zurückgenommen.', false);
+    }catch(err){
+      showMsg('Übergabe konnte nicht gespeichert werden: ' + err.message, true);
+    }
+  }
+
+  function onHandover(e){
+    const to = e.currentTarget.value;
+    if (!to) return;
+    setHandover(e.currentTarget.dataset.handoverNr, to);
+  }
+  function onUndoHandover(e){
+    setHandover(e.currentTarget.dataset.undoHandover, '');
   }
 
   async function loadTickets(){
@@ -395,9 +500,12 @@
     // erledigt, bleibt das urspruengliche Datum erhalten (nicht bei jedem Klick neu setzen).
     // Beim Abschalten faellt das Datum weg.
     const doneDate = set.has('erledigt') ? (parsed.doneDate || todayStr()) : '';
-    // parsed.extras enthaelt u.a. die Rang-Token - die muessen erhalten bleiben, sonst
-    // wuerde ein Klick auf ein Status-Symbol Eugenias Reihenfolge loeschen.
-    const newStatus = encodeFlags(set, doneDate, parsed.extras);
+    // parsed.extras enthaelt u.a. Rang- und Datums-Token - die muessen erhalten bleiben, sonst
+    // wuerde ein Klick auf ein Status-Symbol Eugenias Reihenfolge loeschen. Ein offener
+    // Uebergabe-Wunsch wird ebenfalls mitgenommen (er steht nicht in extras).
+    const extras = parsed.extras.slice();
+    if (parsed.handoverTo) extras.push('uebergabe@' + parsed.handoverFrom + '>' + parsed.handoverTo);
+    const newStatus = encodeFlags(set, doneDate, extras);
     t.status = newStatus;
     t.completedAt = doneDate;
     renderTable();
