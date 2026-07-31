@@ -53,7 +53,18 @@
   .flag-toggle-sm.flag-static{ cursor:default; display:inline-block; }
   /* Auf dem Rechner nur das Symbol - die Bedeutung kommt per Tooltip beim Draufzeigen. */
   .flag-label{ display:none; }
-  #doneRangeRow{ display:none; }
+  /* Status-Filter: mehrere gleichzeitig wählbar, Treffer = mindestens einer passt.
+     Ersetzt das frühere "erledigte anzeigen"-Häkchen - erledigt ist dort einfach einer
+     der Status. Frei kombinierbar mit dem Zeitraum daneben. */
+  .sf-row{ gap:5px; }
+  .sf-chip{
+    padding:5px 9px; border-radius:14px; border:1px solid var(--border-strong);
+    background:#fff; color:var(--muted); cursor:pointer; font-size:12px; font-family:inherit;
+  }
+  .sf-chip.active{ background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .sf-chip[data-sf="erledigt"].active{ background:var(--ok); border-color:var(--ok); }
+  .sf-label{ font-size:12.5px; color:var(--muted); align-self:center; }
+  #clearRange{ padding:5px 9px; font-size:12px; color:var(--muted); }
   .rang{
     display:inline-block; min-width:24px; text-align:center; border-radius:6px;
     padding:3px 6px; font-size:12.5px; font-weight:700;
@@ -98,9 +109,16 @@
     .card > .row{ flex-direction:column; align-items:stretch; gap:8px; }
     .card > .row > label{ display:flex; align-items:center; gap:8px; }
     #whoAmI, #search{ width:100%; font-size:16px; }   /* 16px verhindert Auto-Zoom auf iOS */
-    #doneRangeRow{ flex-direction:row; gap:8px; }
-    #doneRangeRow label{ flex:1; display:flex; align-items:center; gap:6px; }
+    /* Status-Chips umbrechen lassen, Zeitraum-Zeile zweizeilig (Bezug oben, von/bis darunter) */
+    .sf-row{ flex-direction:row; flex-wrap:wrap; gap:6px; }
+    .sf-chip{ padding:7px 11px; font-size:13px; }
+    #doneRangeRow{ flex-direction:row; flex-wrap:wrap; gap:8px; }
+    #doneRangeRow > label:first-child{ flex:1 0 100%; }
+    #dateBasis{ flex:1; font-size:16px; }
+    #doneRangeRow label{ display:flex; align-items:center; gap:6px; }
+    #doneRangeRow > label:nth-child(2), #doneRangeRow > label:nth-child(3){ flex:1; }
     #doneFrom, #doneTo{ flex:1; min-width:0; font-size:16px; }
+    #clearRange{ padding:9px 12px; font-size:15px; }
     .card > .row > span[style]{ display:none; }        /* der Abstandshalter */
     .btn-row{ display:flex; gap:8px; }                 /* Buttons nebeneinander lassen */
     #refreshBtn{ flex:1; padding:11px 12px; font-size:15px; }
@@ -153,17 +171,25 @@
 <body>
 <div class="wrap">
   <h1>📋 Aufgaben-Status</h1>
-  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert"). Die Spalte <b>Rang</b> zeigt die von Eugenia festgelegte Reihenfolge: <b>1 zuerst erledigen</b>, danach 2, 3 usw. Aufgaben ohne Rang stehen darunter.</p>
+  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert"). Die Spalte <b>Rang</b> zeigt die von Eugenia festgelegte Reihenfolge: <b>1 zuerst erledigen</b>, danach 2, 3 usw. Aufgaben ohne Rang stehen darunter. Über <b>Status</b> und <b>Zeitraum</b> kannst du die Liste eingrenzen — beides lässt sich kombinieren, mehrere Status gleichzeitig sind möglich.</p>
 
   <div class="card">
     <div class="row">
       <label>Wer bist du?
         <select id="whoAmI"></select>
       </label>
-      <label style="display:flex; align-items:center; gap:5px;"><input type="checkbox" id="showDone"> erledigte anzeigen</label>
+      <span class="row sf-row" id="statusFilter"></span>
       <span class="row" id="doneRangeRow">
+        <label>Zeitraum
+          <select id="dateBasis">
+            <option value="erledigt">erledigt am</option>
+            <option value="faellig">fällig am</option>
+            <option value="erstellt">erstellt am</option>
+          </select>
+        </label>
         <label>von <input type="date" id="doneFrom"></label>
         <label>bis <input type="date" id="doneTo"></label>
+        <button type="button" id="clearRange" title="Zeitraum zurücksetzen">✕</button>
       </span>
       <input type="text" id="search" placeholder="Suche...">
       <span style="flex:1;"></span>
@@ -305,8 +331,25 @@
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
 
+  // Auswählbare Status im Filter. "offen" ist kein eigenes Flag, sondern die Umkehrung von
+  // erledigt - damit man die frühere Standardansicht (nur unerledigte) mit einem Klick hat.
+  const STATUS_CHIPS = [
+    { key: 'offen',           label: 'offen' },
+    { key: 'bearbeitung',     label: '🔧 in Bearbeitung' },
+    { key: 'kundeInformiert', label: '📨 Kunden informiert' },
+    { key: 'wartestellung',   label: '⏳ Wartestellung' },
+    { key: 'rueckgestellt',   label: '⏸ Rückgestellt' },
+    { key: 'erledigt',        label: '✅ erledigt' }
+  ];
+  const STORAGE_KEY_SF = 'kollegenStatusFilter';
+
   let tickets = [];
   let whoAmI = localStorage.getItem(STORAGE_KEY_WHO) || '';
+  let statusFilter = new Set();
+  try{
+    const gespeichert = JSON.parse(localStorage.getItem(STORAGE_KEY_SF) || '["offen"]');
+    if (Array.isArray(gespeichert)) statusFilter = new Set(gespeichert);
+  }catch(e){ statusFilter = new Set(['offen']); }
   // Merkt sich, welche Detail-Bereiche gerade aufgeklappt sind. Ohne diesen Zustand wuerden
   // sie bei jedem Neuzeichnen der Tabelle wieder zuklappen (z.B. nach einem Status-Klick
   // oder beim automatischen Aktualisieren jede Minute).
@@ -314,6 +357,42 @@
 
   function getBackendUrl(){
     return localStorage.getItem(STORAGE_KEY_URL) || DEFAULT_BACKEND_URL;
+  }
+
+  // Trifft der Status-Filter auf diese Aufgabe zu? Mehrere gewählte Status sind ein ODER
+  // (z.B. "Wartestellung" + "erledigt" zeigt beides). Nichts gewählt = keine Einschränkung.
+  function matchesStatusFilter(t){
+    if (!statusFilter.size) return true;
+    const set = parseFlags(t.status);
+    const done = set.has('erledigt');
+    for (const k of statusFilter){
+      if (k === 'offen'){ if (!done) return true; }
+      else if (k === 'erledigt'){ if (done) return true; }
+      else if (set.has(k)) return true;
+    }
+    return false;
+  }
+
+  // Datum, auf das sich der Von/Bis-Zeitraum bezieht - wählbar, damit der Zeitraum mit jedem
+  // Status kombinierbar ist (ein Erledigt-Datum gibt es bei offenen Aufgaben ja nicht).
+  function dateForRange(t){
+    const basis = $('dateBasis').value;
+    if (basis === 'faellig') return parseStatus(t.status).dueDate;
+    if (basis === 'erstellt') return parseStatus(t.status).createdAt;
+    return completedDate(t);
+  }
+
+  function renderStatusFilter(){
+    $('statusFilter').innerHTML = '<span class="sf-label">Status:</span>' + STATUS_CHIPS.map(c =>
+      `<button type="button" class="sf-chip${statusFilter.has(c.key) ? ' active' : ''}" data-sf="${c.key}">${c.label}</button>`
+    ).join('');
+    document.querySelectorAll('#statusFilter .sf-chip').forEach(el => el.addEventListener('click', () => {
+      const k = el.dataset.sf;
+      if (statusFilter.has(k)) statusFilter.delete(k); else statusFilter.add(k);
+      localStorage.setItem(STORAGE_KEY_SF, JSON.stringify([...statusFilter]));
+      renderStatusFilter();
+      loadTickets();
+    }));
   }
 
   function escapeHtml(s){
@@ -340,25 +419,21 @@
   }
 
   function renderTable(){
-    const showDone = $('showDone').checked;
     const doneFrom = $('doneFrom').value;
     const doneTo = $('doneTo').value;
     const q = $('search').value.trim().toLowerCase();
     // Ohne Auswahl bei "Wer bist du?": alle Aufgaben, nur zur Übersicht (nicht bearbeitbar - es gibt
     // niemanden, dem eine Änderung zugeschrieben werden könnte). Sobald ein Name ausgewählt ist: nur
-    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar. "erledigte anzeigen"
-    // ist ein echter Umschalter (nicht "zusätzlich anzeigen"): unangehakt nur offene Aufgaben,
-    // angehakt NUR erledigte (optional zusätzlich per Von/Bis nach completedAt eingegrenzt) - die
-    // beiden Ansichten werden nie gemischt.
+    // noch die eigenen Aufgaben anzeigen, und die sind dann alle bearbeitbar.
+    // Status-Filter und Zeitraum wirken unabhängig voneinander und lassen sich beliebig
+    // kombinieren (z.B. "Wartestellung" + fällig zwischen zwei Daten).
     const rows = tickets.filter(t => {
-      const isDone = parseFlags(t.status).has('erledigt');
-      if (showDone){
-        if (!isDone) return false;
-        const c = completedDate(t);
-        if (doneFrom && (!c || c < doneFrom)) return false;
-        if (doneTo && (!c || c > doneTo)) return false;
-      } else {
-        if (isDone) return false;
+      if (!matchesStatusFilter(t)) return false;
+      if (doneFrom || doneTo){
+        const c = dateForRange(t);
+        if (!c) return false;                       // ohne passendes Datum nicht im Zeitraum
+        if (doneFrom && c < doneFrom) return false;
+        if (doneTo && c > doneTo) return false;
       }
       if (whoAmI){
         const assigneeList = (t.assignees || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -382,8 +457,7 @@
 
     if (!rows.length){
       const wer = whoAmI ? 'eigenen ' : '';
-      const art = showDone ? 'erledigten' : 'offenen';
-      $('ticketBody').innerHTML = `<tr><td colspan="6" class="empty">Keine ${wer}${art} Aufgaben in dieser Ansicht.</td></tr>`;
+      $('ticketBody').innerHTML = `<tr><td colspan="6" class="empty">Keine ${wer}Aufgaben mit diesem Status im gewählten Zeitraum.</td></tr>`;
       return;
     }
 
@@ -570,15 +644,17 @@
     localStorage.setItem(STORAGE_KEY_WHO, whoAmI);
     renderTable();
   });
-  $('showDone').addEventListener('change', (e) => {
-    $('doneRangeRow').style.display = e.target.checked ? 'flex' : 'none';
-    if (e.target.checked) loadTickets(); else renderTable();
-  });
   // Bei Änderung des Von/Bis-Zeitraums zusätzlich frisch vom Server laden (nicht nur die
-  // schon geladene Liste neu filtern) - damit auch erledigte Aufgaben auftauchen, die ein
-  // Kollege gerade eben erst (z.B. innerhalb der letzten Minute) erledigt gesetzt hat.
+  // schon geladene Liste neu filtern) - damit auch Änderungen auftauchen, die ein Kollege
+  // gerade eben erst (z.B. innerhalb der letzten Minute) gesetzt hat.
   $('doneFrom').addEventListener('change', loadTickets);
   $('doneTo').addEventListener('change', loadTickets);
+  $('dateBasis').addEventListener('change', renderTable);
+  $('clearRange').addEventListener('click', () => {
+    $('doneFrom').value = '';
+    $('doneTo').value = '';
+    renderTable();
+  });
   $('search').addEventListener('input', renderTable);
   $('refreshBtn').addEventListener('click', loadTickets);
   $('settingsBtn').addEventListener('click', () => {
@@ -591,6 +667,7 @@
     loadTickets();
   });
 
+  renderStatusFilter();
   loadTickets();
   setInterval(loadTickets, 60000);
 })();
