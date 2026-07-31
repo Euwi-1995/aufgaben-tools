@@ -161,7 +161,7 @@
 <body>
 <div class="wrap">
   <h1>📋 Aufgaben-Status</h1>
-  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert"). Die Spalte <b>Rang</b> zeigt die von Eugenia festgelegte Reihenfolge: <b>1 zuerst erledigen</b>, danach 2, 3 usw. Aufgaben ohne Rang stehen darunter. <b>Status</b> und <b>von/bis</b> wirken immer zusammen.</p>
+  <p class="hint">Ohne Auswahl bei "Wer bist du?" siehst du alle Aufgaben als Übersicht. Sobald du dich auswählst, siehst und bearbeitest du nur noch deine eigenen — pro Aufgabe kannst du mehrere Status gleichzeitig an- und abschalten (z.B. "in Bearbeitung" und "Kunden informiert"). Die Spalte <b>Rang</b> zeigt die von Eugenia festgelegte Reihenfolge: <b>1 zuerst erledigen</b>, danach 2, 3 usw. Aufgaben ohne Rang stehen darunter. <b>Status</b> und <b>von/bis</b> wirken immer zusammen. Eine Aufgabe gilt als offen, solange sie nicht erledigt ist — die Status dazwischen (in Bearbeitung, Wartestellung …) sind zusätzliche Markierungen und lassen sich einzeln herausfiltern.</p>
 
   <div class="card">
     <div class="row">
@@ -170,13 +170,13 @@
       </label>
       <label>Status
         <select id="statusSel">
-          <option value="">alle</option>
-          <option value="offen">offen</option>
+          <option value="offen">alle offenen</option>
           <option value="bearbeitung">🔧 in Bearbeitung</option>
           <option value="kundeInformiert">📨 Kunden informiert</option>
           <option value="wartestellung">⏳ Wartestellung</option>
           <option value="rueckgestellt">⏸ Rückgestellt</option>
           <option value="erledigt">✅ erledigt</option>
+          <option value="">alle (auch erledigte)</option>
         </select>
       </label>
       <span class="row" id="doneRangeRow">
@@ -337,8 +337,9 @@
     return localStorage.getItem(STORAGE_KEY_URL) || DEFAULT_BACKEND_URL;
   }
 
-  // Trifft der gewählte Status auf diese Aufgabe zu? Leer = alle.
-  // "offen" ist kein eigenes Flag, sondern die Umkehrung von erledigt.
+  // Trifft die gewählte Filterstufe auf diese Aufgabe zu? Leer = alle (auch erledigte).
+  // "offen" ist kein Status neben den anderen, sondern schlicht "noch nicht erledigt" -
+  // eine Aufgabe kann offen sein und dabei zusätzlich in Bearbeitung, in Wartestellung usw.
   function matchesStatusFilter(t){
     const k = $('statusSel').value;
     if (!k) return true;
