@@ -105,8 +105,9 @@
     #search{ width:100%; font-size:16px; }             /* 16px verhindert Auto-Zoom auf iOS */
     /* von/bis nebeneinander, dürfen bei Bedarf umbrechen; nichts darf über den Rand ragen */
     #doneRangeRow{ flex-direction:row; flex-wrap:wrap; gap:8px; align-items:center; }
-    #doneRangeRow label{ display:flex; align-items:center; gap:5px; flex:1 1 130px; min-width:0; }
-    #doneFrom, #doneTo{ flex:1; min-width:0; width:100%; font-size:15px; padding:7px 4px; }
+    /* nicht wachsen lassen, sonst wird der ✕-Knopf in die nächste Zeile gedrückt */
+    #doneRangeRow label{ display:flex; align-items:center; gap:4px; flex:0 1 auto; min-width:0; }
+    #doneFrom, #doneTo{ min-width:0; font-size:15px; padding:7px 2px; }
     #clearRange{ padding:9px 12px; font-size:15px; flex:0 0 auto; }
     .card > .row > span[style]{ display:none; }        /* der Abstandshalter */
     .btn-row{ display:flex; gap:8px; }                 /* Buttons nebeneinander lassen */
